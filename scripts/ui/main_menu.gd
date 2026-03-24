@@ -38,6 +38,9 @@ func _ready() -> void:
 	# START RACE button
 	_build_start_button(ui_layer)
 
+	# EXIT button
+	_build_exit_button(ui_layer)
+
 	# Select current difficulty button
 	_update_difficulty_selection()
 
@@ -428,3 +431,42 @@ func _build_start_button(ui_layer: CanvasLayer) -> void:
 
 func _on_start_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+# =========================================================================
+#  EXIT BUTTON
+# =========================================================================
+
+func _build_exit_button(ui_layer: CanvasLayer) -> void:
+	var btn = Button.new()
+	btn.text = "EXIT"
+	btn.position = Vector2(270, 1170)
+	btn.size = Vector2(180, 50)
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.4, 0.1, 0.1, 0.6)
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+	style.border_color = Color(0.8, 0.3, 0.3, 0.4)
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	btn.add_theme_stylebox_override("normal", style)
+
+	var hover = style.duplicate()
+	hover.bg_color = Color(0.6, 0.15, 0.15, 0.8)
+	btn.add_theme_stylebox_override("hover", hover)
+	btn.add_theme_stylebox_override("pressed", hover)
+
+	btn.add_theme_font_size_override("font_size", 20)
+	btn.add_theme_color_override("font_color", Color(0.9, 0.7, 0.7, 0.8))
+
+	btn.pressed.connect(_on_exit_pressed)
+	ui_layer.add_child(btn)
+
+
+func _on_exit_pressed() -> void:
+	get_tree().quit()

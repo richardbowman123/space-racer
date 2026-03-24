@@ -55,8 +55,6 @@ func _ready() -> void:
 	var params = GameSettings.get_params()
 	ship.base_speed = params["base_speed"]
 	ship.max_speed = params["max_speed"]
-	ship.centrifugal_strength = params["centrifugal_strength"]
-	ship.centre_pull = params["centre_pull"]
 	ship.max_offset = params["max_offset"]
 	ship.steer_smooth = params["steer_smooth"]
 
@@ -120,15 +118,7 @@ func _process(delta: float) -> void:
 		"racing":
 			_race_elapsed += delta
 			_process_rings()
-			# Asteroids disabled while tuning pure racing feel
-			#_process_hazard_spawning()
-			#_process_hazard_movement()
-			#_process_hazard_collision()
-			#_process_projectiles(delta)
-			_process_boost_pads()
-			_process_speed_gates()
-			_process_crosswinds(delta)
-			_process_gravity_wells(delta)
+			# All other objects disabled — just hearts and chevrons
 			_process_racing_hud()
 
 

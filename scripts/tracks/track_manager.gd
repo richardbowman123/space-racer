@@ -26,19 +26,12 @@ func _ready() -> void:
 	_build_curve()
 	_define_rings()
 	_define_hazard_waves()
-	_define_boost_pads()
-	_define_speed_gates()
-	_define_crosswinds()
-	_define_gravity_wells()
+	# Boost pads, speed gates, crosswinds, gravity wells disabled — just two collectible types
 	_generate_track_ribbon()
 	_generate_edge_lines()
 	_generate_wire_tube()
 	_generate_gate_markers()
 	_generate_ring_visuals()
-	_generate_boost_pad_visuals()
-	_generate_speed_gate_visuals()
-	_generate_crosswind_visuals()
-	_generate_gravity_well_visuals()
 
 
 func _process(delta: float) -> void:
@@ -108,10 +101,29 @@ func _build_curve() -> void:
 		{"pos": Vector3(0, -35, -1680), "tilt": 0.0},
 		{"pos": Vector3(0, -30, -1900), "tilt": 0.0},
 		{"pos": Vector3(0, -25, -2100), "tilt": 0.0},
-		{"pos": Vector3(35, -15, -2250), "tilt": 0.25},
-		{"pos": Vector3(-30, -5, -2380), "tilt": -0.25},
-		{"pos": Vector3(15, 0, -2480), "tilt": 0.1},
-		{"pos": Vector3(0, 0, -2600), "tilt": 0.0},
+		# --- Corkscrew 1: right-hand descending spiral (2 revolutions) ---
+		{"pos": Vector3(20, -35, -2140), "tilt": 1.57},      # Right, banking
+		{"pos": Vector3(0, -55, -2180), "tilt": 3.14},        # Bottom of loop
+		{"pos": Vector3(-20, -45, -2220), "tilt": 4.71},      # Left side
+		{"pos": Vector3(0, -30, -2260), "tilt": 6.28},        # Top, 1 full revolution
+		{"pos": Vector3(20, -40, -2300), "tilt": 7.85},       # Right again
+		{"pos": Vector3(0, -60, -2340), "tilt": 9.42},        # Bottom
+		{"pos": Vector3(-20, -50, -2380), "tilt": 10.99},     # Left
+		{"pos": Vector3(0, -35, -2420), "tilt": 12.57},       # Top, 2 full revolutions
+		# --- Transition ---
+		{"pos": Vector3(0, -35, -2460), "tilt": 12.57},       # Brief straight
+		# --- Corkscrew 2: left-hand spiral, unwinding (2 revolutions) ---
+		{"pos": Vector3(-20, -45, -2500), "tilt": 10.99},     # Left first (opposite)
+		{"pos": Vector3(0, -60, -2540), "tilt": 9.42},        # Bottom
+		{"pos": Vector3(20, -50, -2580), "tilt": 7.85},       # Right
+		{"pos": Vector3(0, -35, -2620), "tilt": 6.28},        # Top, 1 rev unwound
+		{"pos": Vector3(-20, -45, -2660), "tilt": 4.71},      # Left
+		{"pos": Vector3(0, -60, -2700), "tilt": 3.14},        # Bottom
+		{"pos": Vector3(20, -50, -2740), "tilt": 1.57},       # Right
+		{"pos": Vector3(0, -35, -2780), "tilt": 0.0},         # Fully unwound
+		# --- Home straight ---
+		{"pos": Vector3(0, -30, -2840), "tilt": 0.0},
+		{"pos": Vector3(0, -25, -2940), "tilt": 0.0},
 	]
 
 	for i in range(points.size()):
@@ -155,13 +167,11 @@ func _define_rings() -> void:
 		var ox = rng.randf_range(-0.8, 0.8)
 		var oy = rng.randf_range(-0.4, 0.4)
 
-		# Difficulty determines value: harder to reach = more reward
+		# Harder to reach = better reward
 		var difficulty = absf(ox) + absf(oy) * 1.5
-		var value = 1
-		if difficulty > 0.8:
-			value = 3  # Gold
-		elif difficulty > 0.45:
-			value = 2  # Silver
+		var value = 1  # Heart (good)
+		if difficulty > 0.6:
+			value = 2  # Chevron (very good)
 
 		ring_data.append({
 			"progress": prog,
@@ -179,12 +189,13 @@ func _generate_ring_visuals() -> void:
 		return
 	var baked_length = c.get_baked_length()
 
-	# Materials for different crystal values
-	var crystal_mats = {
-		1: _make_crystal_material(Color(0.1, 0.9, 0.2, 0.85), Color(0.05, 0.8, 0.15, 1.0)),   # Green
-		2: _make_crystal_material(Color(0.2, 0.5, 1.0, 0.85), Color(0.15, 0.45, 0.95, 1.0)),   # Blue
-		3: _make_crystal_material(Color(1.0, 0.85, 0.1, 0.9), Color(0.95, 0.75, 0.05, 1.0)),   # Gold
-	}
+	# Materials: green for hearts, cyan for chevrons
+	var heart_mat = _make_crystal_material(Color(0.1, 0.9, 0.2, 0.85), Color(0.05, 0.85, 0.15, 1.0))
+	var chevron_mat = _make_crystal_material(Color(0.1, 0.8, 1.0, 0.9), Color(0.05, 0.75, 0.95, 1.0))
+	var heart_glow_mat = heart_mat.duplicate()
+	heart_glow_mat.emission_energy_multiplier = 5.0
+	var chevron_glow_mat = chevron_mat.duplicate()
+	chevron_glow_mat.emission_energy_multiplier = 5.0
 
 	for ring in ring_data:
 		var prog = ring["progress"]
@@ -201,61 +212,110 @@ func _generate_ring_visuals() -> void:
 		var right = fwd.cross(up).normalized()
 		up = right.cross(fwd).normalized()
 
-		# Crystal world position = track pos + offset
 		var max_off = 14.0
-		var crystal_pos = pos + right * ring["offset_x"] * max_off + up * ring["offset_y"] * max_off * 0.5
+		var item_pos = pos + right * ring["offset_x"] * max_off + up * ring["offset_y"] * max_off * 0.5
 
-		# Create a diamond crystal (two cones tip-to-tip)
-		var crystal_root = Node3D.new()
-		crystal_root.position = crystal_pos
-		crystal_root.name = "Crystal_%d" % ring_data.find(ring)
+		var item_root = Node3D.new()
+		item_root.position = item_pos
+		item_root.name = "Pickup_%d" % ring_data.find(ring)
 
 		var value = ring["value"]
-		var crystal_scale = 0.8 + float(value) * 0.25  # Bigger crystals = more valuable
 
-		# Top cone (point up)
-		var top_cone = MeshInstance3D.new()
-		var top_mesh = CylinderMesh.new()
-		top_mesh.top_radius = 0.0
-		top_mesh.bottom_radius = 0.8 * crystal_scale
-		top_mesh.height = 1.6 * crystal_scale
-		top_mesh.radial_segments = 6  # Hexagonal cross-section for crystal look
-		top_cone.mesh = top_mesh
-		top_cone.material_override = crystal_mats[value]
-		top_cone.position = Vector3(0, 0.8 * crystal_scale, 0)
-		crystal_root.add_child(top_cone)
+		if value == 1:
+			# --- GREEN HEART ---
+			# Two spheres on top for the bumps
+			var left_bump = MeshInstance3D.new()
+			var lb_mesh = SphereMesh.new()
+			lb_mesh.radius = 0.5
+			lb_mesh.height = 1.0
+			lb_mesh.radial_segments = 8
+			lb_mesh.rings = 6
+			left_bump.mesh = lb_mesh
+			left_bump.material_override = heart_mat
+			left_bump.position = Vector3(-0.35, 0.3, 0)
+			item_root.add_child(left_bump)
 
-		# Bottom cone (point down)
-		var bottom_cone = MeshInstance3D.new()
-		var bottom_mesh = CylinderMesh.new()
-		bottom_mesh.top_radius = 0.8 * crystal_scale
-		bottom_mesh.bottom_radius = 0.0
-		bottom_mesh.height = 1.6 * crystal_scale
-		bottom_mesh.radial_segments = 6
-		bottom_cone.mesh = bottom_mesh
-		bottom_cone.material_override = crystal_mats[value]
-		bottom_cone.position = Vector3(0, -0.8 * crystal_scale, 0)
-		crystal_root.add_child(bottom_cone)
+			var right_bump = MeshInstance3D.new()
+			right_bump.mesh = lb_mesh
+			right_bump.material_override = heart_mat
+			right_bump.position = Vector3(0.35, 0.3, 0)
+			item_root.add_child(right_bump)
 
-		# Small inner glow sphere
-		var glow = MeshInstance3D.new()
-		var glow_mesh = SphereMesh.new()
-		glow_mesh.radius = 0.4 * crystal_scale
-		glow_mesh.height = 0.8 * crystal_scale
-		glow_mesh.radial_segments = 6
-		glow_mesh.rings = 4
-		glow.mesh = glow_mesh
-		var glow_mat = crystal_mats[value].duplicate()
-		glow_mat.emission_energy_multiplier = 5.0
-		glow.material_override = glow_mat
-		crystal_root.add_child(glow)
+			# Cone pointing down for the heart's tip
+			var tip = MeshInstance3D.new()
+			var tip_mesh = CylinderMesh.new()
+			tip_mesh.top_radius = 0.65
+			tip_mesh.bottom_radius = 0.0
+			tip_mesh.height = 1.1
+			tip_mesh.radial_segments = 8
+			tip.mesh = tip_mesh
+			tip.material_override = heart_mat
+			tip.position = Vector3(0, -0.3, 0)
+			item_root.add_child(tip)
 
-		# Store spin metadata and base position for animation
-		crystal_root.set_meta("spin_speed", 1.5 + float(value) * 0.5)
-		crystal_root.set_meta("base_y", crystal_pos.y)
+			# Inner glow
+			var glow = MeshInstance3D.new()
+			var glow_mesh = SphereMesh.new()
+			glow_mesh.radius = 0.35
+			glow_mesh.height = 0.7
+			glow_mesh.radial_segments = 6
+			glow_mesh.rings = 4
+			glow.mesh = glow_mesh
+			glow.material_override = heart_glow_mat
+			glow.position = Vector3(0, 0.1, 0)
+			item_root.add_child(glow)
 
-		add_child(crystal_root)
-		ring["visual_node"] = crystal_root
+		else:
+			# --- CYAN CHEVRON (forward arrows >>) ---
+			# Two angled boxes forming a > shape
+			var arm_mesh = BoxMesh.new()
+			arm_mesh.size = Vector3(0.2, 0.2, 1.8)
+
+			var top_arm = MeshInstance3D.new()
+			top_arm.mesh = arm_mesh
+			top_arm.material_override = chevron_mat
+			top_arm.position = Vector3(0, 0.35, -0.3)
+			top_arm.rotation_degrees = Vector3(25, 0, 0)
+			item_root.add_child(top_arm)
+
+			var bottom_arm = MeshInstance3D.new()
+			bottom_arm.mesh = arm_mesh
+			bottom_arm.material_override = chevron_mat
+			bottom_arm.position = Vector3(0, -0.35, -0.3)
+			bottom_arm.rotation_degrees = Vector3(-25, 0, 0)
+			item_root.add_child(bottom_arm)
+
+			# Second chevron behind (>> double arrow)
+			var top_arm2 = MeshInstance3D.new()
+			top_arm2.mesh = arm_mesh
+			top_arm2.material_override = chevron_mat
+			top_arm2.position = Vector3(0, 0.35, 0.5)
+			top_arm2.rotation_degrees = Vector3(25, 0, 0)
+			item_root.add_child(top_arm2)
+
+			var bottom_arm2 = MeshInstance3D.new()
+			bottom_arm2.mesh = arm_mesh
+			bottom_arm2.material_override = chevron_mat
+			bottom_arm2.position = Vector3(0, -0.35, 0.5)
+			bottom_arm2.rotation_degrees = Vector3(-25, 0, 0)
+			item_root.add_child(bottom_arm2)
+
+			# Centre glow
+			var glow = MeshInstance3D.new()
+			var glow_mesh = SphereMesh.new()
+			glow_mesh.radius = 0.3
+			glow_mesh.height = 0.6
+			glow_mesh.radial_segments = 6
+			glow_mesh.rings = 4
+			glow.mesh = glow_mesh
+			glow.material_override = chevron_glow_mat
+			item_root.add_child(glow)
+
+		item_root.set_meta("spin_speed", 1.5 + float(value) * 0.5)
+		item_root.set_meta("base_y", item_pos.y)
+
+		add_child(item_root)
+		ring["visual_node"] = item_root
 
 
 func _make_crystal_material(albedo: Color, emission: Color) -> StandardMaterial3D:

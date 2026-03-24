@@ -525,16 +525,10 @@ func update_racing_line(bonus: float) -> void:
 
 # --- Ring collection flash ---
 func show_ring_collect(chain: int, value: int) -> void:
-	var value_names = {1: "+CRYSTAL", 2: "+SILVER", 3: "+GOLD!"}
-	var value_colours = {
-		1: Color(0.2, 1.0, 0.3, 1.0),
-		2: Color(0.3, 0.6, 1.0, 1.0),
-		3: Color(1.0, 0.85, 0.1, 1.0),
-	}
-	var text = value_names.get(value, "+CRYSTAL")
-	if value == 3:
-		text += " (+SHIELD)"
-	show_flash(text, value_colours.get(value, Color(1.0, 1.0, 1.0, 1.0)))
+	if value == 2:
+		show_flash("+SURGE!", Color(0.1, 0.85, 1.0, 1.0))
+	else:
+		show_flash("+BOOST", Color(0.2, 1.0, 0.3, 1.0))
 
 
 # --- Hazard hit flash ---

@@ -23,15 +23,10 @@ var _stun_timer: float = 0.0
 @export var max_offset: float = 14.0
 ## Exponential smoothing rate for steering (higher = snappier)
 @export var steer_smooth: float = 16.0
-## How fast ship drifts back to centre when not steering
-@export var centre_pull: float = 1.0
-## How much track curves push the ship outward (like centrifugal force)
-@export var centrifugal_strength: float = 40.0
 
 var steering_offset: Vector2 = Vector2.ZERO
 var _prev_steering_offset: Vector2 = Vector2.ZERO
-var _curve_lateral: float = 0.0    # Raw track curvature — lateral component
-var _curve_vertical: float = 0.0   # Raw track curvature — vertical component
+var _ship_heading: Vector3 = Vector3.ZERO  # Persistent world-space flight direction
 var _visual_pos: Vector3 = Vector3.ZERO
 var _visual_basis: Basis = Basis.IDENTITY
 var _visual_initialized: bool = false
@@ -68,9 +63,6 @@ var _drift_direction: float = 0.0  # Sign of the turn (-1 or +1)
 var drift_active: bool = false     # Is drift currently building?
 
 signal drift_released(boost: float)
-
-# --- Crosswind ---
-var crosswind_force: Vector2 = Vector2.ZERO  # Set by game_manager each frame
 
 # --- Visuals ---
 @export var bank_intensity: float = 0.7
@@ -129,9 +121,7 @@ func start_race() -> void:
 	drift_timer = 0.0
 	_drift_direction = 0.0
 	drift_active = false
-	crosswind_force = Vector2.ZERO
-	_curve_lateral = 0.0
-	_curve_vertical = 0.0
+	_ship_heading = Vector3.ZERO  # Will be set to track tangent on first frame
 	_stun_timer = 0.0
 	fire_cooldown = 0.0
 	shield_charges = 1
@@ -143,11 +133,10 @@ func collect_ring(value: int) -> void:
 	## Called by GameManager when ship flies through a ring.
 	chain_count += 1
 	chain_multiplier = 1.0 + chain_count * 0.08  # 8% per chain link
-	speed_bonus = minf(speed_bonus + 4.0 * float(value), 70.0)
+	# Hearts (1) = small boost, Chevrons (2) = big boost
+	var boost = 5.0 if value == 1 else 15.0
+	speed_bonus = minf(speed_bonus + boost, 70.0)
 	ring_collected.emit(chain_count, value)
-	# Gold rings award shield charges
-	if value == 3:
-		shield_charges += 1
 
 
 func hit_hazard() -> void:
@@ -235,9 +224,62 @@ func _process(delta: float) -> void:
 	# --- Drift boost ---
 	_process_drift(delta)
 
-	current_speed = clampf(current_speed, base_speed * 0.3, max_speed)
+	# --- Compute track frame at current progress ---
+	var safe_p = clampf(progress, 0.0, baked_length - 1.0)
+	var cur_pos = track_curve.sample_baked(safe_p)
+	var cur_up = track_curve.sample_baked_up_vector(safe_p)
+	var cur_ahead_p = clampf(progress + 5.0, 0.0, baked_length - 0.5)
+	var cur_ahead = track_curve.sample_baked(cur_ahead_p)
+	var cur_fwd = (cur_ahead - cur_pos)
+	if cur_fwd.length() < 0.001:
+		cur_fwd = Vector3(0, 0, -1)
+	cur_fwd = cur_fwd.normalized()
+	var cur_right = cur_fwd.cross(cur_up).normalized()
+	cur_up = cur_right.cross(cur_fwd).normalized()
 
-	# Advance along track
+	# Initialise heading to track tangent on first frame
+	if _ship_heading.length() < 0.5:
+		_ship_heading = cur_fwd
+
+	# --- Steering input ---
+	var input = TouchInput.get_steering()
+	var steer_factor = 1.0 - exp(-steer_smooth * delta)
+
+	if input.length() > 0.01:
+		var target_offset = input * max_offset
+		steering_offset = steering_offset.lerp(target_offset, steer_factor)
+		# Player is actively steering — realign heading toward track tangent.
+		# This means steering effectively redirects the ship.
+		var realign_factor = 1.0 - exp(-steer_smooth * 0.5 * delta)
+		_ship_heading = _ship_heading.lerp(cur_fwd, realign_factor).normalized()
+	# No input = heading stays fixed = ship flies straight in world space.
+
+	# --- Straight-line drift from persistent heading ---
+	# _ship_heading is WHERE THE SHIP WANTS TO FLY in world space.
+	# On a straight track it matches the tangent, so no drift.
+	# On a curve the tangent rotates but the heading stays fixed.
+	# The lateral component of that divergence pushes the ship
+	# across the tunnel — exactly like real inertia.
+	var heading_lateral = _ship_heading.dot(cur_right)
+	var heading_vertical = _ship_heading.dot(cur_up)
+	steering_offset.x += heading_lateral * current_speed * delta
+	steering_offset.y += heading_vertical * current_speed * delta
+
+	# --- Honey/rough boundary ---
+	var offset_dist = steering_offset.length()
+	if offset_dist > max_offset:
+		var overshoot = (offset_dist - max_offset) / (max_offset * 0.5)
+		overshoot = clampf(overshoot, 0.0, 1.0)
+		current_speed *= 1.0 - overshoot * overshoot * 0.92
+		speed_bonus = maxf(speed_bonus - 30.0 * overshoot * delta, 0.0)
+
+	# Hard limit: can't drift further than 1.5x tunnel width
+	if steering_offset.length() > max_offset * 1.5:
+		steering_offset = steering_offset.normalized() * max_offset * 1.5
+
+	current_speed = clampf(current_speed, base_speed * 0.05, max_speed)
+
+	# --- Advance progress ---
 	progress += current_speed * delta
 
 	# Check finish
@@ -246,41 +288,12 @@ func _process(delta: float) -> void:
 		race_finished.emit(race_time)
 		return
 
-	# --- Steering (direct response) ---
-	var input = TouchInput.get_steering()
-
-	# Frame-rate independent exponential smoothing: 1 - e^(-rate * dt)
-	var steer_factor = 1.0 - exp(-steer_smooth * delta)
-	var centre_factor = 1.0 - exp(-centre_pull * delta)
-
-	if input.length() > 0.01:
-		var target_offset = input * max_offset
-		steering_offset = steering_offset.lerp(target_offset, steer_factor)
-	else:
-		steering_offset = steering_offset.lerp(Vector2.ZERO, centre_factor)
-
-	# Apply crosswind force (set by game_manager each frame)
-	if crosswind_force.length() > 0.01:
-		steering_offset += crosswind_force * delta
-
-	# Centrifugal force — track curves push ship outward
-	# On a right curve, the ship drifts left (outward). Player must steer
-	# into the curve to stay in the tunnel. Stronger at higher speeds.
-	var speed_factor = current_speed / maxf(base_speed, 1.0)
-	steering_offset.x -= _curve_lateral * centrifugal_strength * speed_factor * delta
-	steering_offset.y -= _curve_vertical * centrifugal_strength * speed_factor * delta
-
-	# Wall contact — scraping the tunnel wall slows you down
-	if steering_offset.length() > max_offset:
-		steering_offset = steering_offset.normalized() * max_offset
-		speed_bonus = maxf(speed_bonus - 12.0 * delta, 0.0)
-
-	# --- Compute target position on track ---
-	var safe_p = clampf(progress, 0.0, baked_length - 1.0)
-	var track_pos = track_curve.sample_baked(safe_p)
-	var track_up = track_curve.sample_baked_up_vector(safe_p)
-	var ahead_p = clampf(progress + 5.0, 0.0, baked_length - 0.5)
-	var track_ahead = track_curve.sample_baked(ahead_p)
+	# --- Compute track frame at new progress (for visual) ---
+	var new_safe_p = clampf(progress, 0.0, baked_length - 1.0)
+	var track_pos = track_curve.sample_baked(new_safe_p)
+	var track_up = track_curve.sample_baked_up_vector(new_safe_p)
+	var new_ahead_p = clampf(progress + 5.0, 0.0, baked_length - 0.5)
+	var track_ahead = track_curve.sample_baked(new_ahead_p)
 	var track_fwd = (track_ahead - track_pos)
 	if track_fwd.length() < 0.001:
 		track_fwd = Vector3(0, 0, -1)
@@ -288,6 +301,7 @@ func _process(delta: float) -> void:
 	var track_right = track_fwd.cross(track_up).normalized()
 	track_up = track_right.cross(track_fwd).normalized()
 
+	# --- Visual position ---
 	var target_pos = track_pos + track_right * steering_offset.x + track_up * steering_offset.y
 
 	# --- Compute target orientation ---
@@ -296,7 +310,7 @@ func _process(delta: float) -> void:
 	var bank_angle = -steering_offset.x / max_offset * bank_intensity
 	var banked_up = track_up.rotated(track_fwd, bank_angle)
 
-	# Build target basis by temporarily setting transform
+	# Build target basis
 	var saved_basis = global_transform.basis
 	var saved_pos = global_position
 	global_position = target_pos
@@ -306,8 +320,6 @@ func _process(delta: float) -> void:
 	var target_basis = global_transform.basis
 
 	# --- Smooth visual interpolation (frame-rate independent) ---
-	# High rates here so visual tracks the logical position tightly
-	# without the multi-frame lag that causes "stepping" feel
 	if not _visual_initialized:
 		_visual_pos = target_pos
 		_visual_basis = target_basis
@@ -358,8 +370,6 @@ func _compute_racing_line(delta: float) -> void:
 	var dir_behind = (pos_here - pos_behind)
 	if dir_forward.length() < 0.1 or dir_behind.length() < 0.1:
 		_apex_bonus = lerpf(_apex_bonus, 0.0, 1.0 - exp(-4.0 * delta))
-		_curve_lateral = lerpf(_curve_lateral, 0.0, 1.0 - exp(-10.0 * delta))
-		_curve_vertical = lerpf(_curve_vertical, 0.0, 1.0 - exp(-10.0 * delta))
 	else:
 		dir_forward = dir_forward.normalized()
 		dir_behind = dir_behind.normalized()
@@ -375,10 +385,6 @@ func _compute_racing_line(delta: float) -> void:
 		# How much the track curves laterally (+ = curving right) and vertically (+ = curving up)
 		var curve_right = curvature.dot(track_right)
 		var curve_up = curvature.dot(track_up)
-
-		# Store raw curvature for centrifugal force (lightly smoothed to avoid jitter)
-		_curve_lateral = lerpf(_curve_lateral, curve_right, 1.0 - exp(-10.0 * delta))
-		_curve_vertical = lerpf(_curve_vertical, curve_up, 1.0 - exp(-10.0 * delta))
 
 		# The "inside" of a right curve is the LEFT side (negative x offset)
 		# The "inside" of an upward curve is the BOTTOM (negative y offset)

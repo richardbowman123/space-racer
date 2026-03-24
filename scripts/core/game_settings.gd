@@ -1,5 +1,4 @@
 extends Node
-class_name GameSettings
 ## Autoloaded singleton: difficulty parameters, best-time persistence.
 
 enum Difficulty { EASY, NORMAL, HARD }
@@ -10,24 +9,18 @@ const PARAMS := {
 	Difficulty.EASY: {
 		"base_speed": 55.0,
 		"max_speed": 130.0,
-		"centrifugal_strength": 25.0,
-		"centre_pull": 1.8,
 		"max_offset": 16.0,
 		"steer_smooth": 18.0,
 	},
 	Difficulty.NORMAL: {
 		"base_speed": 70.0,
 		"max_speed": 160.0,
-		"centrifugal_strength": 40.0,
-		"centre_pull": 1.0,
 		"max_offset": 14.0,
 		"steer_smooth": 16.0,
 	},
 	Difficulty.HARD: {
 		"base_speed": 85.0,
 		"max_speed": 190.0,
-		"centrifugal_strength": 55.0,
-		"centre_pull": 0.6,
 		"max_offset": 12.0,
 		"steer_smooth": 14.0,
 	},
