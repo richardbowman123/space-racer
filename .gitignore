@@ -1,0 +1,6 @@
+# Godot cache — generated automatically, not needed in version control
+.godot/
+
+# OS files
+.DS_Store
+Thumbs.db
