@@ -11,12 +11,13 @@ config_version=5
 [application]
 
 config/name="Space Racer"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/menu.tscn"
 config/features=PackedStringArray("4.6")
 
 [autoload]
 
 TouchInput="*res://scripts/core/touch_input.gd"
+GameSettings="*res://scripts/core/game_settings.gd"
 
 [display]
 
