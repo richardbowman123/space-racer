@@ -1,14 +1,27 @@
 extends Node3D
-## Main menu: animated starfield, rotating ship, difficulty selector, best time, START RACE.
+## Main menu: animated starfield, rotating ship, track selector,
+## difficulty selector, best time, START RACE.
 
 var _ship_node: Node3D = null
 var _difficulty_buttons: Array = []
 var _best_time_label: Label = null
 var _title_label: Label = null
 var _title_tween: Tween = null
+var _track_name_label: Label = null
+var _track_subtitle_label: Label = null
+var _track_index: int = 0
 
 
 func _ready() -> void:
+	# Reset clear colour for menu
+	RenderingServer.set_default_clear_color(Color(0.005, 0.005, 0.02, 1.0))
+
+	# Set initial track index from current selection
+	var order = TrackData.TRACK_ORDER
+	_track_index = order.find(GameSettings.current_track)
+	if _track_index < 0:
+		_track_index = 0
+
 	# Build the 3D ship display
 	_build_ship()
 
@@ -29,6 +42,9 @@ func _ready() -> void:
 	# Title
 	_build_title(ui_layer)
 
+	# Track selector
+	_build_track_selector(ui_layer)
+
 	# Difficulty selector
 	_build_difficulty_selector(ui_layer)
 
@@ -43,6 +59,7 @@ func _ready() -> void:
 
 	# Select current difficulty button
 	_update_difficulty_selection()
+	_update_track_display()
 
 
 func _process(delta: float) -> void:
@@ -244,7 +261,6 @@ func _build_starfield(ui_layer: CanvasLayer) -> void:
 	particles.process_material = mat
 	particles.emitting = true
 
-	# Tiny dot texture placeholder — a 4x4 white square
 	var img = Image.create(4, 4, false, Image.FORMAT_RGBA8)
 	img.fill(Color.WHITE)
 	var tex = ImageTexture.create_from_image(img)
@@ -261,23 +277,125 @@ func _build_title(ui_layer: CanvasLayer) -> void:
 	_title_label = Label.new()
 	_title_label.text = "SPACE RACER"
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title_label.position = Vector2(0, 100)
+	_title_label.position = Vector2(0, 80)
 	_title_label.size = Vector2(720, 100)
 	_title_label.add_theme_font_size_override("font_size", 56)
 	_title_label.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0, 1.0))
 	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui_layer.add_child(_title_label)
 
-	# Subtitle
-	var sub = Label.new()
-	sub.text = "Tunnel Run"
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.position = Vector2(0, 180)
-	sub.size = Vector2(720, 50)
-	sub.add_theme_font_size_override("font_size", 24)
-	sub.add_theme_color_override("font_color", Color(0.6, 0.7, 0.9, 0.6))
-	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui_layer.add_child(sub)
+
+# =========================================================================
+#  TRACK SELECTOR (< TRACK NAME > with subtitle)
+# =========================================================================
+
+func _build_track_selector(ui_layer: CanvasLayer) -> void:
+	# Track name
+	_track_name_label = Label.new()
+	_track_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_track_name_label.position = Vector2(80, 200)
+	_track_name_label.size = Vector2(560, 50)
+	_track_name_label.add_theme_font_size_override("font_size", 30)
+	_track_name_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3, 0.95))
+	_track_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(_track_name_label)
+
+	# Track subtitle
+	_track_subtitle_label = Label.new()
+	_track_subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_track_subtitle_label.position = Vector2(80, 245)
+	_track_subtitle_label.size = Vector2(560, 35)
+	_track_subtitle_label.add_theme_font_size_override("font_size", 20)
+	_track_subtitle_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.9, 0.6))
+	_track_subtitle_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(_track_subtitle_label)
+
+	# Left arrow button
+	var left_btn = Button.new()
+	left_btn.text = "<"
+	left_btn.position = Vector2(20, 195)
+	left_btn.size = Vector2(55, 55)
+	_style_arrow_button(left_btn)
+	left_btn.pressed.connect(_on_track_prev)
+	ui_layer.add_child(left_btn)
+
+	# Right arrow button
+	var right_btn = Button.new()
+	right_btn.text = ">"
+	right_btn.position = Vector2(645, 195)
+	right_btn.size = Vector2(55, 55)
+	_style_arrow_button(right_btn)
+	right_btn.pressed.connect(_on_track_next)
+	ui_layer.add_child(right_btn)
+
+	# Track counter (1/4 etc.)
+	var counter = Label.new()
+	counter.name = "TrackCounter"
+	counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	counter.position = Vector2(80, 275)
+	counter.size = Vector2(560, 25)
+	counter.add_theme_font_size_override("font_size", 16)
+	counter.add_theme_color_override("font_color", Color(0.5, 0.55, 0.7, 0.5))
+	counter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(counter)
+
+
+func _style_arrow_button(btn: Button) -> void:
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.15, 0.2, 0.4, 0.6)
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+	style.border_color = Color(0.4, 0.6, 1.0, 0.5)
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.border_width_top = 2
+	style.border_width_bottom = 2
+	btn.add_theme_stylebox_override("normal", style)
+
+	var hover = style.duplicate()
+	hover.bg_color = Color(0.25, 0.35, 0.6, 0.8)
+	btn.add_theme_stylebox_override("hover", hover)
+	btn.add_theme_stylebox_override("pressed", hover)
+
+	btn.add_theme_font_size_override("font_size", 28)
+	btn.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0, 0.9))
+
+
+func _on_track_prev() -> void:
+	_track_index -= 1
+	if _track_index < 0:
+		_track_index = TrackData.TRACK_ORDER.size() - 1
+	_update_track_display()
+
+
+func _on_track_next() -> void:
+	_track_index += 1
+	if _track_index >= TrackData.TRACK_ORDER.size():
+		_track_index = 0
+	_update_track_display()
+
+
+func _update_track_display() -> void:
+	var track_id = TrackData.TRACK_ORDER[_track_index]
+	GameSettings.current_track = track_id
+
+	_track_name_label.text = TrackData.get_track_name(track_id)
+	_track_subtitle_label.text = TrackData.get_track_subtitle(track_id)
+
+	# Update counter label
+	var counter = get_node_or_null("../CanvasLayer/TrackCounter")
+	# Walk through all children to find the counter
+	for child in get_children():
+		if child is CanvasLayer:
+			var tc = child.find_child("TrackCounter", false)
+			if tc:
+				tc.text = "%d / %d" % [_track_index + 1, TrackData.TRACK_ORDER.size()]
+				break
+
+	# Refresh best time for new track
+	_refresh_best_time()
 
 
 # =========================================================================
@@ -350,7 +468,6 @@ func _update_difficulty_selection() -> void:
 		var btn = _difficulty_buttons[i] as Button
 		if i == GameSettings.current_difficulty:
 			btn.modulate = Color(1.0, 1.0, 1.0, 1.0)
-			# Bright border for selected
 			var style = btn.get_theme_stylebox("normal") as StyleBoxFlat
 			if style:
 				var selected = style.duplicate()
@@ -363,7 +480,6 @@ func _update_difficulty_selection() -> void:
 		else:
 			btn.modulate = Color(0.6, 0.6, 0.6, 0.7)
 
-	# Update best time
 	_refresh_best_time()
 
 

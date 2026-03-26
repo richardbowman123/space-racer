@@ -1,28 +1,29 @@
 extends Node
-## Autoloaded singleton: difficulty parameters, best-time persistence.
+## Autoloaded singleton: difficulty parameters, track selection, best-time persistence.
 
 enum Difficulty { EASY, NORMAL, HARD }
 
 var current_difficulty: int = Difficulty.NORMAL
+var current_track: String = "kessel_stretch"
 
 const PARAMS := {
 	Difficulty.EASY: {
-		"base_speed": 55.0,
-		"max_speed": 130.0,
+		"base_speed": 45.0,
+		"max_speed": 180.0,
 		"max_offset": 16.0,
-		"steer_smooth": 18.0,
+		"steer_smooth": 14.0,
 	},
 	Difficulty.NORMAL: {
-		"base_speed": 70.0,
-		"max_speed": 160.0,
+		"base_speed": 50.0,
+		"max_speed": 220.0,
 		"max_offset": 14.0,
-		"steer_smooth": 16.0,
+		"steer_smooth": 12.0,
 	},
 	Difficulty.HARD: {
-		"base_speed": 85.0,
-		"max_speed": 190.0,
+		"base_speed": 60.0,
+		"max_speed": 260.0,
 		"max_offset": 12.0,
-		"steer_smooth": 14.0,
+		"steer_smooth": 10.0,
 	},
 }
 
@@ -45,13 +46,13 @@ func get_params() -> Dictionary:
 
 
 func get_best_time() -> float:
-	## Returns best time for current difficulty, or -1.0 if none saved.
-	var key = DIFFICULTY_NAMES[current_difficulty]
+	## Returns best time for current track + difficulty, or -1.0 if none saved.
+	var key = current_track + "_" + DIFFICULTY_NAMES[current_difficulty]
 	return _config.get_value("best_times", key, -1.0)
 
 
 func save_best_time(time: float) -> void:
-	var key = DIFFICULTY_NAMES[current_difficulty]
+	var key = current_track + "_" + DIFFICULTY_NAMES[current_difficulty]
 	var existing = _config.get_value("best_times", key, -1.0)
 	if existing < 0.0 or time < existing:
 		_config.set_value("best_times", key, time)

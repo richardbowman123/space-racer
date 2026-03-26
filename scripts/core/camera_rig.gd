@@ -15,11 +15,12 @@ var track_curve: Curve3D = null
 @export var rotation_speed: float = 6.0
 
 ## Lateral tracking — camera follows the ship's sideways movement
-@export var lateral_follow: float = 0.4   # How much camera shifts with ship (0=none, 1=full)
-@export var vertical_follow: float = 0.25  # How much camera shifts with ship's vertical offset
+## Lower values = ship moves more on screen = steering feels bigger
+@export var lateral_follow: float = 0.15   # How much camera shifts with ship (0=none, 1=full)
+@export var vertical_follow: float = 0.10  # How much camera shifts with ship's vertical offset
 
 ## Camera bank — tilts into the direction the ship is steering
-@export var bank_follow: float = 0.3      # Roll angle from ship offset (radians)
+@export var bank_follow: float = 0.55      # Roll angle from ship offset (radians)
 
 ## FOV
 @export var base_fov: float = 70.0
@@ -85,7 +86,7 @@ func _process(delta: float) -> void:
 	global_position = global_position.lerp(target_pos, clampf(position_speed * delta, 0.0, 1.0))
 
 	# Look target also shifts slightly with ship offset for dynamic feel
-	var look_lateral = behind_right * ship_offset.x * 0.6
+	var look_lateral = behind_right * ship_offset.x * 0.35
 	var look_target = ahead_pos + track_up * 2.0 + look_lateral
 
 	# Smooth rotation

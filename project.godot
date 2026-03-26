@@ -27,6 +27,10 @@ window/size/mode=3
 window/stretch/mode="canvas_items"
 window/handheld/orientation=1
 
+[gui]
+
+theme/custom="res://resources/default_theme.tres"
+
 [rendering]
 
 environment/defaults/default_clear_color=Color(0.005, 0.005, 0.02, 1)

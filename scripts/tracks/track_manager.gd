@@ -1,5 +1,5 @@
 extends Path3D
-## Builds the test track: curve geometry, visual elements,
+## Builds the current track from TrackData: curve geometry, visual elements,
 ## energy ring positions, and hazard wave definitions.
 
 # Data exposed to GameManager
@@ -10,28 +10,46 @@ var speed_gate_data: Array = []
 var crosswind_data: Array = []
 var gravity_well_data: Array = []
 
-# Track visual parameters
+# Track visual parameters (set from TrackData in _ready)
 @export var track_width: float = 14.0
 @export var track_segments: int = 200
 @export var gate_spacing: float = 60.0
 
-# Wire tube parameters
+# Wire tube parameters (set from TrackData in _ready)
 @export var tube_radius: float = 8.0
 @export var tube_ring_sides: int = 12
 @export var tube_ring_spacing: float = 15.0
 @export var tube_longitude_count: int = 8
 
+# Current track definition and theme
+var _track_def: Dictionary = {}
+var _theme: Dictionary = {}
+
+var _vortex_node: Node3D = null
+var _vortex_rings: Array = []
 
 func _ready() -> void:
+	# Load track definition
+	var track_id = GameSettings.current_track
+	_track_def = TrackData.get_track(track_id)
+	_theme = _track_def["theme"]
+
+	# Apply track-specific parameters
+	track_width = _track_def.get("track_width", 14.0)
+	tube_radius = _track_def.get("tube_radius", 8.0)
+
+	# Set background colour for this track
+	RenderingServer.set_default_clear_color(_theme["clear_color"])
+
 	_build_curve()
 	_define_rings()
 	_define_hazard_waves()
-	# Boost pads, speed gates, crosswinds, gravity wells disabled — just two collectible types
 	_generate_track_ribbon()
 	_generate_edge_lines()
 	_generate_wire_tube()
 	_generate_gate_markers()
 	_generate_ring_visuals()
+	_generate_finish_vortex()
 
 
 func _process(delta: float) -> void:
@@ -50,6 +68,14 @@ func _process(delta: float) -> void:
 		if node and is_instance_valid(node):
 			var spin = node.get_meta("spin_speed", 0.8)
 			node.rotate_y(spin * delta)
+
+	# Spin finish vortex rings at different speeds
+	for i in range(_vortex_rings.size()):
+		var ring_node = _vortex_rings[i]
+		if ring_node and is_instance_valid(ring_node):
+			var speed = ring_node.get_meta("spin_speed", 1.0)
+			var axis = ring_node.get_meta("spin_axis", Vector3.FORWARD)
+			ring_node.rotate(axis, speed * delta)
 
 
 func get_ring_data() -> Array:
@@ -81,50 +107,7 @@ func _build_curve() -> void:
 	c.up_vector_enabled = true
 	c.bake_interval = 2.0
 
-	var points = [
-		{"pos": Vector3(0, 0, 0), "tilt": 0.0},
-		{"pos": Vector3(0, 0, -80), "tilt": 0.0},
-		{"pos": Vector3(40, 5, -180), "tilt": 0.2},
-		{"pos": Vector3(20, 0, -300), "tilt": 0.0},
-		{"pos": Vector3(-30, -5, -420), "tilt": -0.2},
-		{"pos": Vector3(-10, 0, -540), "tilt": 0.0},
-		{"pos": Vector3(35, 15, -660), "tilt": 0.3},
-		{"pos": Vector3(-25, 5, -760), "tilt": -0.3},
-		{"pos": Vector3(20, -10, -860), "tilt": 0.2},
-		{"pos": Vector3(0, -30, -960), "tilt": 0.0},
-		{"pos": Vector3(-20, -70, -1080), "tilt": -0.15},
-		{"pos": Vector3(10, -90, -1200), "tilt": 0.1},
-		{"pos": Vector3(40, -60, -1320), "tilt": 0.8},
-		{"pos": Vector3(-10, -30, -1400), "tilt": -0.8},
-		{"pos": Vector3(-40, -60, -1480), "tilt": 0.6},
-		{"pos": Vector3(10, -40, -1560), "tilt": -0.4},
-		{"pos": Vector3(0, -35, -1680), "tilt": 0.0},
-		{"pos": Vector3(0, -30, -1900), "tilt": 0.0},
-		{"pos": Vector3(0, -25, -2100), "tilt": 0.0},
-		# --- Corkscrew 1: right-hand descending spiral (2 revolutions) ---
-		{"pos": Vector3(20, -35, -2140), "tilt": 1.57},      # Right, banking
-		{"pos": Vector3(0, -55, -2180), "tilt": 3.14},        # Bottom of loop
-		{"pos": Vector3(-20, -45, -2220), "tilt": 4.71},      # Left side
-		{"pos": Vector3(0, -30, -2260), "tilt": 6.28},        # Top, 1 full revolution
-		{"pos": Vector3(20, -40, -2300), "tilt": 7.85},       # Right again
-		{"pos": Vector3(0, -60, -2340), "tilt": 9.42},        # Bottom
-		{"pos": Vector3(-20, -50, -2380), "tilt": 10.99},     # Left
-		{"pos": Vector3(0, -35, -2420), "tilt": 12.57},       # Top, 2 full revolutions
-		# --- Transition ---
-		{"pos": Vector3(0, -35, -2460), "tilt": 12.57},       # Brief straight
-		# --- Corkscrew 2: left-hand spiral, unwinding (2 revolutions) ---
-		{"pos": Vector3(-20, -45, -2500), "tilt": 10.99},     # Left first (opposite)
-		{"pos": Vector3(0, -60, -2540), "tilt": 9.42},        # Bottom
-		{"pos": Vector3(20, -50, -2580), "tilt": 7.85},       # Right
-		{"pos": Vector3(0, -35, -2620), "tilt": 6.28},        # Top, 1 rev unwound
-		{"pos": Vector3(-20, -45, -2660), "tilt": 4.71},      # Left
-		{"pos": Vector3(0, -60, -2700), "tilt": 3.14},        # Bottom
-		{"pos": Vector3(20, -50, -2740), "tilt": 1.57},       # Right
-		{"pos": Vector3(0, -35, -2780), "tilt": 0.0},         # Fully unwound
-		# --- Home straight ---
-		{"pos": Vector3(0, -30, -2840), "tilt": 0.0},
-		{"pos": Vector3(0, -25, -2940), "tilt": 0.0},
-	]
+	var points = _track_def["points"]
 
 	for i in range(points.size()):
 		var p = points[i]
@@ -152,26 +135,23 @@ func _build_curve() -> void:
 
 func _define_rings() -> void:
 	var rng = RandomNumberGenerator.new()
-	rng.seed = 123
+	rng.seed = _track_def.get("ring_seed", 123)
 	var baked_length = curve.get_baked_length()
 
-	# Place rings at semi-regular intervals with varying offsets
-	var ring_spacing = 45.0
+	var ring_spacing = _track_def.get("ring_spacing", 45.0)
 	var count = int((baked_length - 200.0) / ring_spacing)
 
 	for i in range(count):
 		var prog = 80.0 + float(i) * ring_spacing + rng.randf_range(-10.0, 10.0)
 		prog = clampf(prog, 50.0, baked_length - 80.0)
 
-		# Offset from track centre (normalised -1 to 1)
 		var ox = rng.randf_range(-0.8, 0.8)
 		var oy = rng.randf_range(-0.4, 0.4)
 
-		# Harder to reach = better reward
 		var difficulty = absf(ox) + absf(oy) * 1.5
-		var value = 1  # Heart (good)
+		var value = 1
 		if difficulty > 0.6:
-			value = 2  # Chevron (very good)
+			value = 2
 
 		ring_data.append({
 			"progress": prog,
@@ -189,7 +169,6 @@ func _generate_ring_visuals() -> void:
 		return
 	var baked_length = c.get_baked_length()
 
-	# Materials: green for hearts, cyan for chevrons
 	var heart_mat = _make_crystal_material(Color(0.1, 0.9, 0.2, 0.85), Color(0.05, 0.85, 0.15, 1.0))
 	var chevron_mat = _make_crystal_material(Color(0.1, 0.8, 1.0, 0.9), Color(0.05, 0.75, 0.95, 1.0))
 	var heart_glow_mat = heart_mat.duplicate()
@@ -212,7 +191,7 @@ func _generate_ring_visuals() -> void:
 		var right = fwd.cross(up).normalized()
 		up = right.cross(fwd).normalized()
 
-		var max_off = 14.0
+		var max_off = track_width
 		var item_pos = pos + right * ring["offset_x"] * max_off + up * ring["offset_y"] * max_off * 0.5
 
 		var item_root = Node3D.new()
@@ -222,8 +201,6 @@ func _generate_ring_visuals() -> void:
 		var value = ring["value"]
 
 		if value == 1:
-			# --- GREEN HEART ---
-			# Two spheres on top for the bumps
 			var left_bump = MeshInstance3D.new()
 			var lb_mesh = SphereMesh.new()
 			lb_mesh.radius = 0.5
@@ -241,7 +218,6 @@ func _generate_ring_visuals() -> void:
 			right_bump.position = Vector3(0.35, 0.3, 0)
 			item_root.add_child(right_bump)
 
-			# Cone pointing down for the heart's tip
 			var tip = MeshInstance3D.new()
 			var tip_mesh = CylinderMesh.new()
 			tip_mesh.top_radius = 0.65
@@ -253,7 +229,6 @@ func _generate_ring_visuals() -> void:
 			tip.position = Vector3(0, -0.3, 0)
 			item_root.add_child(tip)
 
-			# Inner glow
 			var glow = MeshInstance3D.new()
 			var glow_mesh = SphereMesh.new()
 			glow_mesh.radius = 0.35
@@ -266,8 +241,6 @@ func _generate_ring_visuals() -> void:
 			item_root.add_child(glow)
 
 		else:
-			# --- CYAN CHEVRON (forward arrows >>) ---
-			# Two angled boxes forming a > shape
 			var arm_mesh = BoxMesh.new()
 			arm_mesh.size = Vector3(0.2, 0.2, 1.8)
 
@@ -285,7 +258,6 @@ func _generate_ring_visuals() -> void:
 			bottom_arm.rotation_degrees = Vector3(-25, 0, 0)
 			item_root.add_child(bottom_arm)
 
-			# Second chevron behind (>> double arrow)
 			var top_arm2 = MeshInstance3D.new()
 			top_arm2.mesh = arm_mesh
 			top_arm2.material_override = chevron_mat
@@ -300,7 +272,6 @@ func _generate_ring_visuals() -> void:
 			bottom_arm2.rotation_degrees = Vector3(-25, 0, 0)
 			item_root.add_child(bottom_arm2)
 
-			# Centre glow
 			var glow = MeshInstance3D.new()
 			var glow_mesh = SphereMesh.new()
 			glow_mesh.radius = 0.3
@@ -311,6 +282,7 @@ func _generate_ring_visuals() -> void:
 			glow.material_override = chevron_glow_mat
 			item_root.add_child(glow)
 
+		item_root.scale = Vector3(3.0, 3.0, 3.0)  # Scaled up for wider tunnels
 		item_root.set_meta("spin_speed", 1.5 + float(value) * 0.5)
 		item_root.set_meta("base_y", item_pos.y)
 
@@ -335,10 +307,10 @@ func _make_crystal_material(albedo: Color, emission: Color) -> StandardMaterial3
 
 func _define_hazard_waves() -> void:
 	var rng = RandomNumberGenerator.new()
-	rng.seed = 77
+	rng.seed = _track_def.get("hazard_seed", 77)
 	var baked_length = curve.get_baked_length()
 
-	var wave_count = 18
+	var wave_count = _track_def.get("hazard_count", 18)
 	var start = 200.0
 	var spacing = (baked_length - 400.0) / float(wave_count)
 
@@ -346,27 +318,23 @@ func _define_hazard_waves() -> void:
 		var prog = start + float(i) * spacing + rng.randf_range(-25.0, 25.0)
 		prog = clampf(prog, 150.0, baked_length - 150.0)
 
-		# Difficulty increases along track
 		var track_ratio = prog / baked_length
 		var osc_speed = 2.0 + track_ratio * 3.0 + rng.randf_range(-0.5, 0.5)
 		var osc_range = 4.0 + track_ratio * 4.0 + rng.randf_range(-1.0, 1.0)
 		var gap_hw = 7.5 - track_ratio * 2.0 + rng.randf_range(-0.5, 0.5)
 		gap_hw = clampf(gap_hw, 5.0, 8.0)
 
-		# Sweep direction: 0=horizontal, 1=vertical, 2=diagonal
-		# More variety as track progresses
 		var sweep_type = 0
 		var roll = rng.randf()
 		if track_ratio > 0.25:
 			if roll < 0.35:
-				sweep_type = 1  # vertical — duck under / go over
+				sweep_type = 1
 			elif roll < 0.55:
-				sweep_type = 2  # diagonal — top-right to bottom-left etc.
+				sweep_type = 2
 		elif track_ratio > 0.15:
 			if roll < 0.2:
 				sweep_type = 1
 
-		# Diagonal angle (only used for sweep_type 2)
 		var diag_angle = rng.randf_range(0.6, 1.2) * (1.0 if rng.randf() > 0.5 else -1.0)
 
 		hazard_wave_data.append({
@@ -437,11 +405,11 @@ func _generate_track_ribbon() -> void:
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.08, 0.15, 0.4, 0.3)
+	mat.albedo_color = _theme["ribbon_albedo"]
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.emission_enabled = true
-	mat.emission = Color(0.08, 0.15, 0.5, 1.0)
-	mat.emission_energy_multiplier = 0.5
+	mat.emission = _theme["ribbon_emission"]
+	mat.emission_energy_multiplier = _theme["ribbon_emission_energy"]
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mesh.surface_set_material(0, mat)
@@ -464,10 +432,10 @@ func _generate_edge_lines() -> void:
 	var half_width = track_width * 0.5
 
 	var edge_mat = StandardMaterial3D.new()
-	edge_mat.albedo_color = Color(0.3, 0.5, 1.0, 0.8)
+	edge_mat.albedo_color = _theme["edge_albedo"]
 	edge_mat.emission_enabled = true
-	edge_mat.emission = Color(0.3, 0.5, 1.0, 1.0)
-	edge_mat.emission_energy_multiplier = 2.0
+	edge_mat.emission = _theme["edge_emission"]
+	edge_mat.emission_energy_multiplier = _theme["edge_emission_energy"]
 	edge_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	edge_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
@@ -511,10 +479,10 @@ func _generate_wire_tube() -> void:
 		return
 
 	var wire_mat = StandardMaterial3D.new()
-	wire_mat.albedo_color = Color(0.25, 0.45, 0.9, 0.35)
+	wire_mat.albedo_color = _theme["wire_albedo"]
 	wire_mat.emission_enabled = true
-	wire_mat.emission = Color(0.2, 0.4, 0.8, 1.0)
-	wire_mat.emission_energy_multiplier = 1.2
+	wire_mat.emission = _theme["wire_emission"]
+	wire_mat.emission_energy_multiplier = _theme["wire_emission_energy"]
 	wire_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	wire_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
@@ -562,8 +530,8 @@ func _generate_wire_tube() -> void:
 
 	# Longitudinal wires
 	var long_mat = wire_mat.duplicate()
-	long_mat.albedo_color = Color(0.2, 0.35, 0.75, 0.2)
-	long_mat.emission_energy_multiplier = 0.8
+	long_mat.albedo_color = _theme["wire_long_albedo"]
+	long_mat.emission_energy_multiplier = _theme["wire_long_emission_energy"]
 	var long_mesh = ArrayMesh.new()
 	var long_arrays = []
 	long_arrays.resize(Mesh.ARRAY_MAX)
@@ -596,10 +564,10 @@ func _generate_gate_markers() -> void:
 	var half_width = track_width * 0.55
 
 	var post_mat = StandardMaterial3D.new()
-	post_mat.albedo_color = Color(0.2, 0.4, 0.8, 0.7)
+	post_mat.albedo_color = _theme["gate_albedo"]
 	post_mat.emission_enabled = true
-	post_mat.emission = Color(0.2, 0.4, 0.9, 1.0)
-	post_mat.emission_energy_multiplier = 1.5
+	post_mat.emission = _theme["gate_emission"]
+	post_mat.emission_energy_multiplier = _theme["gate_emission_energy"]
 	post_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	post_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
@@ -635,7 +603,128 @@ func _generate_gate_markers() -> void:
 
 
 # =========================================================================
-#  BOOST PADS (speed burst on optimal racing lines)
+#  FINISH VORTEX (spiral portal at the end of the track)
+# =========================================================================
+
+func _generate_finish_vortex() -> void:
+	var c = curve
+	if not c:
+		return
+	var baked_length = c.get_baked_length()
+	if baked_length < 50.0:
+		return
+
+	var end_prog = baked_length - 10.0
+	var end_pos = c.sample_baked(end_prog)
+	var end_up = c.sample_baked_up_vector(end_prog)
+	var behind = c.sample_baked(clampf(end_prog - 5.0, 0.0, baked_length - 1.0))
+	var end_fwd = (end_pos - behind)
+	if end_fwd.length() < 0.001:
+		end_fwd = Vector3(0, 0, -1)
+	end_fwd = end_fwd.normalized()
+	var end_right = end_fwd.cross(end_up).normalized()
+	end_up = end_right.cross(end_fwd).normalized()
+
+	_vortex_node = Node3D.new()
+	_vortex_node.name = "FinishVortex"
+	_vortex_node.global_position = end_pos
+	add_child(_vortex_node)
+
+	var ring_configs = [
+		{"radius": 10.0, "thickness": 0.25, "color": Color(0.0, 0.8, 1.0, 0.7), "energy": 4.0, "speed": 1.8, "tilt": 0.0},
+		{"radius": 8.5, "thickness": 0.2, "color": Color(0.2, 0.5, 1.0, 0.65), "energy": 3.5, "speed": -2.5, "tilt": 0.15},
+		{"radius": 7.0, "thickness": 0.18, "color": Color(0.4, 0.3, 1.0, 0.6), "energy": 3.0, "speed": 3.2, "tilt": -0.1},
+		{"radius": 5.5, "thickness": 0.15, "color": Color(0.6, 0.2, 1.0, 0.55), "energy": 3.5, "speed": -4.0, "tilt": 0.2},
+		{"radius": 4.0, "thickness": 0.12, "color": Color(0.8, 0.1, 1.0, 0.5), "energy": 4.0, "speed": 5.0, "tilt": -0.15},
+		{"radius": 2.5, "thickness": 0.1, "color": Color(1.0, 0.3, 0.8, 0.6), "energy": 5.0, "speed": -6.5, "tilt": 0.1},
+		{"radius": 1.2, "thickness": 0.08, "color": Color(1.0, 0.6, 0.3, 0.7), "energy": 6.0, "speed": 8.0, "tilt": 0.0},
+	]
+
+	for cfg in ring_configs:
+		var ring_mi = MeshInstance3D.new()
+		var torus = TorusMesh.new()
+		torus.inner_radius = cfg["radius"] - cfg["thickness"]
+		torus.outer_radius = cfg["radius"] + cfg["thickness"]
+		torus.rings = 32
+		torus.ring_segments = 12
+		ring_mi.mesh = torus
+
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = cfg["color"]
+		mat.emission_enabled = true
+		mat.emission = Color(cfg["color"].r, cfg["color"].g, cfg["color"].b, 1.0)
+		mat.emission_energy_multiplier = cfg["energy"]
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		ring_mi.material_override = mat
+
+		ring_mi.look_at_from_position(Vector3.ZERO, end_fwd, end_up)
+		ring_mi.rotate_object_local(Vector3.RIGHT, cfg["tilt"])
+
+		ring_mi.set_meta("spin_speed", cfg["speed"])
+		ring_mi.set_meta("spin_axis", end_fwd)
+
+		_vortex_node.add_child(ring_mi)
+		_vortex_rings.append(ring_mi)
+
+	# Bright centre core
+	var core = MeshInstance3D.new()
+	var core_mesh = SphereMesh.new()
+	core_mesh.radius = 1.0
+	core_mesh.height = 2.0
+	core_mesh.radial_segments = 12
+	core_mesh.rings = 8
+	core.mesh = core_mesh
+
+	var core_mat = StandardMaterial3D.new()
+	core_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.9)
+	core_mat.emission_enabled = true
+	core_mat.emission = Color(0.8, 0.9, 1.0, 1.0)
+	core_mat.emission_energy_multiplier = 8.0
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	core.material_override = core_mat
+	_vortex_node.add_child(core)
+
+	# Spiral arms
+	var arm_mat = StandardMaterial3D.new()
+	arm_mat.albedo_color = Color(0.3, 0.6, 1.0, 0.3)
+	arm_mat.emission_enabled = true
+	arm_mat.emission = Color(0.4, 0.7, 1.0, 1.0)
+	arm_mat.emission_energy_multiplier = 2.5
+	arm_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	arm_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
+	for arm in range(2):
+		var arm_node = Node3D.new()
+		arm_node.name = "SpiralArm_%d" % arm
+		var base_angle = float(arm) * PI
+
+		for seg in range(16):
+			var t = float(seg) / 16.0
+			var angle = base_angle + t * TAU * 1.5
+			var r = 2.0 + t * 8.0
+			var local_pos = end_right * cos(angle) * r + end_up * sin(angle) * r
+
+			var seg_mi = MeshInstance3D.new()
+			var seg_mesh = SphereMesh.new()
+			seg_mesh.radius = 0.15 + t * 0.25
+			seg_mesh.height = 0.8 + t * 1.2
+			seg_mesh.radial_segments = 6
+			seg_mesh.rings = 4
+			seg_mi.mesh = seg_mesh
+			seg_mi.material_override = arm_mat
+			seg_mi.position = local_pos
+			arm_node.add_child(seg_mi)
+
+		arm_node.set_meta("spin_speed", 1.5)
+		arm_node.set_meta("spin_axis", end_fwd)
+		_vortex_node.add_child(arm_node)
+		_vortex_rings.append(arm_node)
+
+
+# =========================================================================
+#  BOOST PADS (speed burst on optimal racing lines) — DISABLED
 # =========================================================================
 
 func _define_boost_pads() -> void:
@@ -646,7 +735,6 @@ func _define_boost_pads() -> void:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = 42
 
-	# Place boost pads on the inside of curves
 	var sample_step = 30.0
 	var sample_count = int(baked_length / sample_step)
 
@@ -671,15 +759,12 @@ func _define_boost_pads() -> void:
 		var curve_vertical = curvature.dot(track_up)
 		var curve_mag = Vector2(curve_lateral, curve_vertical).length()
 
-		# Only place pads where curvature is significant
 		if curve_mag < 0.015:
 			continue
 
-		# Place pad on the INSIDE of the curve (opposite to curvature direction)
-		var pad_x = -curve_lateral / maxf(curve_mag, 0.001) * 0.5  # Normalised offset (-1 to 1)
+		var pad_x = -curve_lateral / maxf(curve_mag, 0.001) * 0.5
 		var pad_y = -curve_vertical / maxf(curve_mag, 0.001) * 0.3
 
-		# Skip some to avoid overcrowding
 		if rng.randf() < 0.55:
 			continue
 
@@ -687,7 +772,7 @@ func _define_boost_pads() -> void:
 			"progress": prog,
 			"offset_x": clampf(pad_x, -0.8, 0.8),
 			"offset_y": clampf(pad_y, -0.5, 0.5),
-			"boost_amount": 12.0 + curve_mag * 200.0,  # Sharper curve = bigger reward
+			"boost_amount": 12.0 + curve_mag * 200.0,
 			"triggered": false,
 			"visual_node": null,
 		})
@@ -726,7 +811,6 @@ func _generate_boost_pad_visuals() -> void:
 		var max_off = track_width * 0.5
 		var pad_pos = pos + right * pad["offset_x"] * max_off + up * pad["offset_y"] * max_off + up * 0.15
 
-		# Chevron shape: flat box angled forward
 		var mi = MeshInstance3D.new()
 		var box = BoxMesh.new()
 		box.size = Vector3(3.5, 0.08, 5.0)
@@ -741,7 +825,7 @@ func _generate_boost_pad_visuals() -> void:
 
 
 # =========================================================================
-#  SPEED GATES (narrow precision gates for bonus)
+#  SPEED GATES (narrow precision gates for bonus) — DISABLED
 # =========================================================================
 
 func _define_speed_gates() -> void:
@@ -752,7 +836,6 @@ func _define_speed_gates() -> void:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = 99
 
-	# Place speed gates at intervals, offset from centre
 	var gate_count = 12
 	var spacing = (baked_length - 400.0) / float(gate_count)
 
@@ -760,7 +843,6 @@ func _define_speed_gates() -> void:
 		var prog = 200.0 + float(i) * spacing + rng.randf_range(-30.0, 30.0)
 		prog = clampf(prog, 150.0, baked_length - 150.0)
 
-		# Random offset — player needs to steer to hit the gate
 		var ox = rng.randf_range(-0.6, 0.6)
 		var oy = rng.randf_range(-0.3, 0.3)
 
@@ -768,9 +850,9 @@ func _define_speed_gates() -> void:
 			"progress": prog,
 			"offset_x": ox,
 			"offset_y": oy,
-			"gate_half_width": 3.0,  # Narrow!
-			"boost_centre": 18.0,    # Big boost for dead-centre
-			"boost_edge": 6.0,       # Small boost for edges
+			"gate_half_width": 3.0,
+			"boost_centre": 18.0,
+			"boost_edge": 6.0,
 			"passed": false,
 			"visual_node": null,
 		})
@@ -819,21 +901,18 @@ func _generate_speed_gate_visuals() -> void:
 		gate_root.position = gate_centre
 		gate_root.name = "SpeedGate_%d" % speed_gate_data.find(gate)
 
-		# Left post
 		var left_post = MeshInstance3D.new()
 		left_post.mesh = post_mesh
 		left_post.material_override = gate_mat
 		left_post.position = -right * ghw
 		gate_root.add_child(left_post)
 
-		# Right post
 		var right_post = MeshInstance3D.new()
 		right_post.mesh = post_mesh
 		right_post.material_override = gate_mat
 		right_post.position = right * ghw
 		gate_root.add_child(right_post)
 
-		# Top bar connecting them
 		var bar = MeshInstance3D.new()
 		var bar_mesh = BoxMesh.new()
 		bar_mesh.size = Vector3(ghw * 2.0, 0.15, 0.15)
@@ -847,7 +926,7 @@ func _generate_speed_gate_visuals() -> void:
 
 
 # =========================================================================
-#  CROSSWIND ZONES (lateral force pushing ship)
+#  CROSSWIND ZONES — DISABLED
 # =========================================================================
 
 func _define_crosswinds() -> void:
@@ -858,7 +937,6 @@ func _define_crosswinds() -> void:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = 55
 
-	# Place crosswind zones along the track
 	var zone_count = 8
 	var spacing = (baked_length - 400.0) / float(zone_count)
 
@@ -867,8 +945,6 @@ func _define_crosswinds() -> void:
 		prog_start = clampf(prog_start, 200.0, baked_length - 300.0)
 		var zone_length = rng.randf_range(40.0, 80.0)
 
-		# Wind direction: +1 = push right, -1 = push left
-		# Occasionally vertical: +2 = push up, -2 = push down
 		var wind_dir_x = rng.randf_range(-1.0, 1.0)
 		var wind_dir_y = rng.randf_range(-0.5, 0.5)
 		var wind_vec = Vector2(wind_dir_x, wind_dir_y).normalized()
@@ -883,68 +959,8 @@ func _define_crosswinds() -> void:
 		})
 
 
-func _generate_crosswind_visuals() -> void:
-	var c = curve
-	if not c:
-		return
-	var baked_length = c.get_baked_length()
-
-	var streak_mat = StandardMaterial3D.new()
-	streak_mat.albedo_color = Color(0.6, 0.8, 1.0, 0.25)
-	streak_mat.emission_enabled = true
-	streak_mat.emission = Color(0.5, 0.7, 1.0, 1.0)
-	streak_mat.emission_energy_multiplier = 1.5
-	streak_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	streak_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-
-	for zone in crosswind_data:
-		var zone_root = Node3D.new()
-		zone_root.name = "Crosswind_%d" % crosswind_data.find(zone)
-
-		# Generate wind streaks (thin elongated boxes showing wind direction)
-		var prog_mid = (zone["progress_start"] + zone["progress_end"]) * 0.5
-		if prog_mid >= baked_length - 1.0:
-			continue
-
-		var pos = c.sample_baked(clampf(prog_mid, 0.0, baked_length - 1.0))
-		var up = c.sample_baked_up_vector(clampf(prog_mid, 0.0, baked_length - 1.0))
-		var next = c.sample_baked(clampf(prog_mid + 3.0, 0.0, baked_length - 0.1))
-		var fwd = (next - pos)
-		if fwd.length() < 0.001:
-			fwd = Vector3(0, 0, -1)
-		fwd = fwd.normalized()
-		var right = fwd.cross(up).normalized()
-		up = right.cross(fwd).normalized()
-
-		var wind_dir_3d = right * zone["wind_x"] + up * zone["wind_y"]
-
-		var rng = RandomNumberGenerator.new()
-		rng.seed = hash(prog_mid)
-
-		for s in range(12):
-			var streak = MeshInstance3D.new()
-			var smesh = BoxMesh.new()
-			smesh.size = Vector3(0.06, 0.06, 6.0 + rng.randf_range(-2.0, 3.0))
-			streak.mesh = smesh
-			streak.material_override = streak_mat
-
-			var sx = rng.randf_range(-8.0, 8.0)
-			var sy = rng.randf_range(-4.0, 4.0)
-			var sz = rng.randf_range(-15.0, 15.0)
-			streak.position = pos + right * sx + up * sy + fwd * sz
-
-			# Orient streak in wind direction
-			if wind_dir_3d.length() > 0.1:
-				streak.look_at(streak.position + wind_dir_3d, up)
-
-			zone_root.add_child(streak)
-
-		add_child(zone_root)
-		zone["visual_node"] = zone_root
-
-
 # =========================================================================
-#  GRAVITY WELLS (pull ship, slingshot risk/reward)
+#  GRAVITY WELLS — DISABLED
 # =========================================================================
 
 func _define_gravity_wells() -> void:
@@ -962,10 +978,8 @@ func _define_gravity_wells() -> void:
 		var prog = 300.0 + float(i) * spacing + rng.randf_range(-50.0, 50.0)
 		prog = clampf(prog, 200.0, baked_length - 200.0)
 
-		# Place well offset from track centre
 		var off_x = rng.randf_range(-1.2, 1.2)
 		var off_y = rng.randf_range(-0.6, 0.6)
-		# Push wells that are too centred outward
 		if absf(off_x) < 0.3 and absf(off_y) < 0.2:
 			off_x = 0.8 * signf(off_x + 0.01)
 
@@ -974,81 +988,9 @@ func _define_gravity_wells() -> void:
 			"offset_x": off_x,
 			"offset_y": off_y,
 			"pull_strength": rng.randf_range(8.0, 14.0),
-			"pull_radius": rng.randf_range(10.0, 16.0),  # How far the pull reaches
-			"slingshot_bonus": rng.randf_range(15.0, 25.0),  # Speed boost for close flyby
-			"slingshot_radius": 4.0,  # Must get this close for slingshot
+			"pull_radius": rng.randf_range(10.0, 16.0),
+			"slingshot_bonus": rng.randf_range(15.0, 25.0),
+			"slingshot_radius": 4.0,
 			"triggered": false,
 			"visual_node": null,
 		})
-
-
-func _generate_gravity_well_visuals() -> void:
-	var c = curve
-	if not c:
-		return
-	var baked_length = c.get_baked_length()
-
-	var well_mat = StandardMaterial3D.new()
-	well_mat.albedo_color = Color(0.6, 0.1, 0.8, 0.6)
-	well_mat.emission_enabled = true
-	well_mat.emission = Color(0.7, 0.15, 0.9, 1.0)
-	well_mat.emission_energy_multiplier = 3.5
-	well_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	well_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-
-	var ring_mat = well_mat.duplicate()
-	ring_mat.albedo_color = Color(0.5, 0.1, 0.7, 0.3)
-	ring_mat.emission_energy_multiplier = 1.5
-
-	for well in gravity_well_data:
-		var prog = well["progress"]
-		if prog >= baked_length - 1.0:
-			continue
-
-		var pos = c.sample_baked(prog)
-		var up = c.sample_baked_up_vector(prog)
-		var next = c.sample_baked(clampf(prog + 3.0, 0.0, baked_length - 0.1))
-		var fwd = (next - pos)
-		if fwd.length() < 0.001:
-			fwd = Vector3(0, 0, -1)
-		fwd = fwd.normalized()
-		var right = fwd.cross(up).normalized()
-		up = right.cross(fwd).normalized()
-
-		var max_off = track_width * 0.5
-		var well_pos = pos + right * well["offset_x"] * max_off + up * well["offset_y"] * max_off
-
-		var well_root = Node3D.new()
-		well_root.position = well_pos
-		well_root.name = "GravWell_%d" % gravity_well_data.find(well)
-
-		# Core sphere
-		var core = MeshInstance3D.new()
-		var core_mesh = SphereMesh.new()
-		core_mesh.radius = 1.5
-		core_mesh.height = 3.0
-		core_mesh.radial_segments = 12
-		core_mesh.rings = 8
-		core.mesh = core_mesh
-		core.material_override = well_mat
-		well_root.add_child(core)
-
-		# Concentric rings showing pull radius
-		for r in range(3):
-			var ring_mi = MeshInstance3D.new()
-			var torus = TorusMesh.new()
-			var ring_radius = 3.0 + float(r) * 3.5
-			torus.inner_radius = ring_radius - 0.1
-			torus.outer_radius = ring_radius + 0.1
-			torus.rings = 16
-			torus.ring_segments = 4
-			ring_mi.mesh = torus
-			ring_mi.material_override = ring_mat
-			well_root.add_child(ring_mi)
-
-		# Store spin metadata
-		well_root.set_meta("spin_speed", 0.8)
-
-		add_child(well_root)
-		well["visual_node"] = well_root
-		well["world_pos"] = well_pos

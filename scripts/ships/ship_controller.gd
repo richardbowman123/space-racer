@@ -26,24 +26,28 @@ var _stun_timer: float = 0.0
 
 var steering_offset: Vector2 = Vector2.ZERO
 var _prev_steering_offset: Vector2 = Vector2.ZERO
-var _ship_heading: Vector3 = Vector3.ZERO  # Persistent world-space flight direction
 var _visual_pos: Vector3 = Vector3.ZERO
 var _visual_basis: Basis = Basis.IDENTITY
 var _visual_initialized: bool = false
 
 # --- Racing line mechanics ---
-## Speed penalty for rapid steering changes (0 = none, higher = harsher)
-@export var steer_drag_penalty: float = 0.18
+## Speed penalty for aggressive steering (favours smooth arcs over wild corrections)
+@export var steer_drag_penalty: float = 0.08
 ## Speed bonus for being on inside of curves (fraction of base_speed)
-@export var apex_bonus_strength: float = 0.12
+@export var apex_bonus_strength: float = 0.20
 ## Speed penalty for being at extreme track edges (fraction of base_speed)
-@export var edge_drag_strength: float = 0.10
+@export var edge_drag_strength: float = 0.25
 ## How far ahead to sample for curvature detection (track units)
-@export var curvature_sample_dist: float = 40.0
+@export var curvature_sample_dist: float = 60.0
+
+# --- Natural acceleration (always accelerating toward max speed) ---
+## How fast the ship accelerates naturally (speed units per second)
+@export var speed_ramp_rate: float = 10.0
+var _speed_ramp: float = 0.0
 
 # Exposed for HUD
 var racing_line_bonus: float = 0.0   # Current combined bonus/penalty ratio (-1 to +1)
-var _steer_drag: float = 0.0         # Current steering drag (0 to 1)
+var _steer_drag: float = 0.0         # Current steering smoothness penalty (0 to 1)
 var _apex_bonus: float = 0.0         # Current apex bonus (-1 to +1)
 var _edge_drag: float = 0.0          # Current edge drag (0 to 1)
 
@@ -65,8 +69,8 @@ var drift_active: bool = false     # Is drift currently building?
 signal drift_released(boost: float)
 
 # --- Visuals ---
-@export var bank_intensity: float = 0.7
-@export var pitch_intensity: float = 0.35
+@export var bank_intensity: float = 1.2
+@export var pitch_intensity: float = 1.0
 
 # --- Fire ability ---
 var fire_cooldown: float = 0.0
@@ -121,7 +125,7 @@ func start_race() -> void:
 	drift_timer = 0.0
 	_drift_direction = 0.0
 	drift_active = false
-	_ship_heading = Vector3.ZERO  # Will be set to track tangent on first frame
+	_speed_ramp = 0.0
 	_stun_timer = 0.0
 	fire_cooldown = 0.0
 	shield_charges = 1
@@ -151,6 +155,7 @@ func hit_hazard() -> void:
 	chain_count = 0
 	chain_multiplier = 1.0
 	speed_bonus = maxf(speed_bonus - 25.0, 0.0)
+	_speed_ramp *= 0.6  # Lose 40% of built-up momentum
 	_stun_timer = 0.6  # Brief massive slowdown
 	hazard_hit_signal.emit()
 
@@ -202,7 +207,11 @@ func _process(delta: float) -> void:
 		chain_count = 0
 		chain_multiplier = 1.0
 
-	current_speed = (base_speed + speed_bonus) * chain_multiplier
+	# Natural acceleration: always building speed toward max
+	var ramp_ceiling = max_speed - base_speed
+	_speed_ramp = minf(_speed_ramp + speed_ramp_rate * delta, ramp_ceiling)
+
+	current_speed = (base_speed + _speed_ramp + speed_bonus) * chain_multiplier
 
 	if _stun_timer > 0.0:
 		_stun_timer -= delta
@@ -212,11 +221,11 @@ func _process(delta: float) -> void:
 	_compute_racing_line(delta)
 
 	# Apply racing line speed modifiers
-	# Steering drag: penalise rapid direction changes
+	# Steer drag: penalise aggressive/jerky steering (rewards smooth arcs)
 	current_speed *= (1.0 - _steer_drag * steer_drag_penalty)
 	# Apex bonus: reward inside-line positioning on curves
 	current_speed *= (1.0 + _apex_bonus * apex_bonus_strength)
-	# Edge drag: penalise extreme lateral positions
+	# Edge drag: penalise extreme lateral positions (smooth, progressive)
 	current_speed *= (1.0 - _edge_drag * edge_drag_strength)
 
 	racing_line_bonus = _apex_bonus * apex_bonus_strength - _steer_drag * steer_drag_penalty - _edge_drag * edge_drag_strength
@@ -237,41 +246,25 @@ func _process(delta: float) -> void:
 	var cur_right = cur_fwd.cross(cur_up).normalized()
 	cur_up = cur_right.cross(cur_fwd).normalized()
 
-	# Initialise heading to track tangent on first frame
-	if _ship_heading.length() < 0.5:
-		_ship_heading = cur_fwd
-
-	# --- Steering input ---
+	# --- Steering input (simple direct model) ---
+	# Drag/mouse = move ship. Let go = ship returns to centre.
 	var input = TouchInput.get_steering()
 	var steer_factor = 1.0 - exp(-steer_smooth * delta)
 
 	if input.length() > 0.01:
 		var target_offset = input * max_offset
 		steering_offset = steering_offset.lerp(target_offset, steer_factor)
-		# Player is actively steering — realign heading toward track tangent.
-		# This means steering effectively redirects the ship.
-		var realign_factor = 1.0 - exp(-steer_smooth * 0.5 * delta)
-		_ship_heading = _ship_heading.lerp(cur_fwd, realign_factor).normalized()
-	# No input = heading stays fixed = ship flies straight in world space.
+	else:
+		# No input — drift back to centre of the track
+		steering_offset = steering_offset.lerp(Vector2.ZERO, steer_factor)
 
-	# --- Straight-line drift from persistent heading ---
-	# _ship_heading is WHERE THE SHIP WANTS TO FLY in world space.
-	# On a straight track it matches the tangent, so no drift.
-	# On a curve the tangent rotates but the heading stays fixed.
-	# The lateral component of that divergence pushes the ship
-	# across the tunnel — exactly like real inertia.
-	var heading_lateral = _ship_heading.dot(cur_right)
-	var heading_vertical = _ship_heading.dot(cur_up)
-	steering_offset.x += heading_lateral * current_speed * delta
-	steering_offset.y += heading_vertical * current_speed * delta
-
-	# --- Honey/rough boundary ---
+	# --- Soft boundary (progressive slowdown past max_offset, not a jolty wall) ---
 	var offset_dist = steering_offset.length()
 	if offset_dist > max_offset:
 		var overshoot = (offset_dist - max_offset) / (max_offset * 0.5)
 		overshoot = clampf(overshoot, 0.0, 1.0)
-		current_speed *= 1.0 - overshoot * overshoot * 0.92
-		speed_bonus = maxf(speed_bonus - 30.0 * overshoot * delta, 0.0)
+		current_speed *= 1.0 - overshoot * overshoot * 0.4
+		speed_bonus = maxf(speed_bonus - 10.0 * overshoot * delta, 0.0)
 
 	# Hard limit: can't drift further than 1.5x tunnel width
 	if steering_offset.length() > max_offset * 1.5:
@@ -339,7 +332,7 @@ func _process(delta: float) -> void:
 
 func _compute_racing_line(delta: float) -> void:
 	## Calculates three racing-line factors that affect speed:
-	## 1) Steering drag: how fast the player is changing direction
+	## 1) Steer drag: how aggressively the player is changing direction
 	## 2) Apex bonus: whether ship is on the inside of the current curve
 	## 3) Edge drag: how close to the track boundary the ship is
 
@@ -349,13 +342,12 @@ func _compute_racing_line(delta: float) -> void:
 	var baked_length = track_curve.get_baked_length()
 	var safe_p = clampf(progress, 0.0, baked_length - 1.0)
 
-	# --- 1. STEERING DRAG ---
-	# Measure how fast the steering offset is changing (not the absolute position)
+	# --- 1. STEER DRAG (rewards smooth steering) ---
+	# Measure how fast the steering offset is changing
 	var steer_velocity = (steering_offset - _prev_steering_offset) / maxf(delta, 0.001)
-	# Normalise: max meaningful velocity is roughly max_offset * steer_smooth
 	var steer_speed = steer_velocity.length() / (max_offset * 6.0)
-	# Smooth the drag value to avoid jitter
-	_steer_drag = lerpf(_steer_drag, clampf(steer_speed, 0.0, 1.0), 1.0 - exp(-6.0 * delta))
+	# Very slow smoothing — builds up gradually during wild corrections, fades gently
+	_steer_drag = lerpf(_steer_drag, clampf(steer_speed, 0.0, 1.0), 1.0 - exp(-2.0 * delta))
 
 	# --- 2. APEX BONUS (3D curvature) ---
 	# Sample track direction at current position and ahead to find curvature
@@ -395,7 +387,7 @@ func _compute_racing_line(delta: float) -> void:
 		# How strong is the curvature? (0 = straight, higher = sharper bend)
 		var curvature_magnitude = Vector2(curve_right, curve_up).length()
 		# Scale: typical curvature values are 0.0 to 0.05
-		var curvature_strength = clampf(curvature_magnitude * 25.0, 0.0, 1.0)
+		var curvature_strength = clampf(curvature_magnitude * 30.0, 0.0, 1.0)
 
 		# How well does the ship's position match the ideal?
 		# Dot product of normalised ship offset and normalised ideal direction
@@ -417,12 +409,14 @@ func _compute_racing_line(delta: float) -> void:
 			# Straight section — no apex bonus or penalty
 			_apex_bonus = lerpf(_apex_bonus, 0.0, 1.0 - exp(-4.0 * delta))
 
-	# --- 3. EDGE DRAG ---
-	# Penalise being near the track boundary (squared for gentle centre, harsh edges)
+	# --- 2. EDGE DRAG ---
+	# Progressive slowdown: starts gentle at 40% offset, gets strong at edges.
+	# Cubic curve means the centre 40% is free, then drag builds smoothly.
 	var edge_ratio = steering_offset.length() / max_offset
-	var raw_edge_drag = clampf((edge_ratio - 0.6) / 0.4, 0.0, 1.0)  # Kicks in past 60% offset
-	raw_edge_drag = raw_edge_drag * raw_edge_drag  # Squared curve: gentle near 60%, harsh at 100%
-	_edge_drag = lerpf(_edge_drag, raw_edge_drag, 1.0 - exp(-8.0 * delta))
+	var raw_edge_drag = clampf((edge_ratio - 0.4) / 0.6, 0.0, 1.0)
+	raw_edge_drag = raw_edge_drag * raw_edge_drag * raw_edge_drag  # Cubic: very gentle start
+	# Slow smoothing so edge drag fades in/out gradually, never jolty
+	_edge_drag = lerpf(_edge_drag, raw_edge_drag, 1.0 - exp(-2.0 * delta))
 
 
 func _process_drift(delta: float) -> void:

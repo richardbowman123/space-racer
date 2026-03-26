@@ -16,7 +16,7 @@ var _last_touch_pos: Vector2 = Vector2.ZERO
 var _exclusion_rects: Array = []
 
 ## Pixels of drag required for full steering input
-@export var drag_range: float = 180.0
+@export var drag_range: float = 200.0
 ## Central dead zone as fraction (0-1). Prevents twitchy micro-corrections.
 @export var dead_zone: float = 0.05
 ## Smoothing speed (higher = more responsive, lower = smoother)

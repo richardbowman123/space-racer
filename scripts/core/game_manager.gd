@@ -7,10 +7,15 @@ extends Node3D
 @onready var ship: Node3D = $PlayerShip
 @onready var camera: Camera3D = $Camera
 @onready var hud: CanvasLayer = $HUD
+@onready var beep_player: AudioStreamPlayer = $BeepPlayer
 
 var race_state: String = "waiting"  # waiting | countdown | racing | finished
 var countdown_timer: float = 0.0
 var _last_countdown: int = -1
+
+# Audio (beeps generated in code, music is autoplay in scene)
+var _beep_normal: AudioStreamWAV = null   # 3, 2, 1
+var _beep_go: AudioStreamWAV = null        # GO!
 
 # Ring & hazard data (fetched from track_manager)
 var ring_data: Array = []
@@ -27,9 +32,9 @@ var _hazard_spawn_distance: float = 250.0
 var _hazard_despawn_distance: float = 80.0
 var _race_elapsed: float = 0.0
 
-# Ring detection tolerances
-var _ring_progress_tolerance: float = 8.0
-var _ring_offset_tolerance: float = 5.0
+# Ring detection tolerances (scaled for wider tunnels)
+var _ring_progress_tolerance: float = 12.0
+var _ring_offset_tolerance: float = 12.0
 
 # Hazard collision tolerance
 var _hazard_progress_tolerance: float = 4.0
@@ -51,11 +56,13 @@ func _ready() -> void:
 	ship.shield_broke.connect(_on_shield_broke)
 	ship.shield_expired.connect(_on_shield_expired)
 
-	# Apply difficulty parameters from GameSettings
+	# Apply difficulty parameters from GameSettings, scaled by track width
 	var params = GameSettings.get_params()
 	ship.base_speed = params["base_speed"]
 	ship.max_speed = params["max_speed"]
-	ship.max_offset = params["max_offset"]
+	var track_def = TrackData.get_track(GameSettings.current_track)
+	var width_scale = track_def.get("track_width", 14.0) / 14.0
+	ship.max_offset = params["max_offset"] * width_scale
 	ship.steer_smooth = params["steer_smooth"]
 
 	# Camera needs ship and curve references
@@ -94,7 +101,39 @@ func _ready() -> void:
 		var cam_pos = track.curve.sample_baked(0.0)
 		camera.global_position = cam_pos + start_up * 6.0
 
+	# Set up audio
+	_setup_audio()
+
 	_start_countdown()
+
+
+func _setup_audio() -> void:
+	# Music is autoplay in the scene — nothing to do here.
+	# Just generate the countdown beeps.
+	_beep_normal = _generate_beep(880.0, 0.15)   # A5 — short pip
+	_beep_go = _generate_beep(1760.0, 0.3)        # A6 — higher, longer
+
+
+func _generate_beep(frequency: float, duration: float) -> AudioStreamWAV:
+	var sample_rate := 44100
+	var num_samples := int(duration * sample_rate)
+	var data := PackedByteArray()
+	data.resize(num_samples * 2)  # 16-bit = 2 bytes per sample
+
+	for i in range(num_samples):
+		var t := float(i) / sample_rate
+		var env := 1.0 - float(i) / num_samples
+		env = env * env
+		var sample_val := sin(t * frequency * TAU) * env * 0.6
+		var sample_int := int(clampf(sample_val, -1.0, 1.0) * 32767)
+		data.encode_s16(i * 2, sample_int)
+
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = sample_rate
+	wav.stereo = false
+	wav.data = data
+	return wav
 
 
 func _start_countdown() -> void:
@@ -130,10 +169,18 @@ func _process_countdown(delta: float) -> void:
 		_last_countdown = count
 		if count <= 0:
 			hud.show_countdown_go()
+			_play_beep(_beep_go)
 			race_state = "racing"
 			ship.start_race()
 		elif count <= 3:
 			hud.show_countdown(count)
+			_play_beep(_beep_normal)
+
+
+func _play_beep(beep: AudioStreamWAV) -> void:
+	if beep_player and beep:
+		beep_player.stream = beep
+		beep_player.play()
 
 
 # =========================================================================
@@ -170,7 +217,7 @@ func _on_shield_expired() -> void:
 func _process_rings() -> void:
 	var ship_prog = ship.progress
 	var ship_offset = ship.steering_offset
-	var max_off = ship.max_offset
+	var max_off = track.track_width
 
 	for ring in ring_data:
 		if ring["collected"]:
